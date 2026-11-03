@@ -6,6 +6,9 @@ from PIL import Image
 import random
 from backend.deepfake_model import DeepfakeCNNLSTM
 
+def frame_number(frame_path):
+    return int(frame_path.rsplit('_frame_', 1)[1].removesuffix('.jpg'))
+
 class DeepfakeFrameDataset(Dataset):
     def __init__(self, frame_root, sequence_length=10, transform=None):
         self.sequence_length = sequence_length
@@ -18,11 +21,11 @@ class DeepfakeFrameDataset(Dataset):
 
             for filename in os.listdir(subfolder_path):
                 if filename.endswith('.jpg'):
-                    video_id = "_".join(filename.split('_')[:2])
+                    video_id = filename.rsplit('_frame_', 1)[0]
                     video_frames.setdefault(video_id, []).append(os.path.join(subfolder_path, filename))
 
             for video_id, frame_paths in video_frames.items():
-                frame_paths.sort()
+                frame_paths.sort(key=frame_number)
                 if len(frame_paths) >= sequence_length:
                     self.samples.append((frame_paths, label))
 
