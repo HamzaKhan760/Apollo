@@ -11,6 +11,7 @@ import torch.nn as nn
 import torchvision.models as models
 import torch.optim as optim
 from sklearn.metrics import classification_report
+import shutil
 
 # load_dotenv()
 # AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY')
@@ -203,20 +204,89 @@ with torch.no_grad():
 accuracy = 100 * correct / total
 print(f"\nTest Accuracy: {accuracy:.2f}%")
 '''
-model.load_state_dict(torch.load('deepfake_cnn_lstm.pth'))
-model.eval()
+# model.load_state_dict(torch.load('deepfake_cnn_lstm.pth'))
+# model.eval()
 
 
-all_preds = []
-all_labels = []
+# all_preds = []
+# all_labels = []
 
-with torch.no_grad():
-    for frames, labels in test_loader:
-        frames, labels = frames.to(device), labels.to(device)
-        outputs = model(frames)
-        predicted = (torch.sigmoid(outputs) >= 0.5).int()
+# with torch.no_grad():
+#     for frames, labels in test_loader:
+#         frames, labels = frames.to(device), labels.to(device)
+#         outputs = model(frames)
+#         predicted = (torch.sigmoid(outputs) >= 0.5).int()
         
-        all_preds.extend(predicted.cpu().tolist())
-        all_labels.extend(labels.cpu().tolist())
+#         all_preds.extend(predicted.cpu().tolist())
+#         all_labels.extend(labels.cpu().tolist())
 
-print(classification_report(all_labels, all_preds, target_names=["Real", "Fake"]))
+# print(classification_report(all_labels, all_preds, target_names=["Real", "Fake"]))
+
+def predict_deepfake(video_path, model, transform, device, sequence_length=10):
+    """
+    Runs deepfake prediction on a given video file.
+
+    Args:
+        video_path (str): Path to the video file.
+        model (torch.nn.Module): Trained DeepfakeCNNLSTM model.
+        transform: Image transform pipeline.
+        device: torch.device.
+        sequence_length (int): Number of frames per sequence.
+
+    Returns:
+        prob (float): Deepfake probability between 0 and 1.
+        prediction (str): "FAKE" or "REAL".
+    """
+
+    frame_output_dir = "temp_frames"
+    os.makedirs(frame_output_dir, exist_ok=True)
+
+    # Step 1: Extract frames
+    cap = cv2.VideoCapture(video_path)
+    frame_count = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame_path = os.path.join(frame_output_dir, f"frame_{frame_count:04d}.jpg")
+        cv2.imwrite(frame_path, frame)
+        frame_count += 1
+
+    cap.release()
+
+    if frame_count < sequence_length:
+        shutil.rmtree(frame_output_dir)
+        raise ValueError(f"Video must have at least {sequence_length} frames.")
+
+    # Step 2: Load first sequence
+    frame_paths = sorted([os.path.join(frame_output_dir, f) for f in os.listdir(frame_output_dir) if f.endswith('.jpg')])
+    selected_frames = frame_paths[:sequence_length]
+
+    frames = []
+    for frame_path in selected_frames:
+        img = Image.open(frame_path).convert("RGB")
+        img = transform(img)
+        frames.append(img)
+
+    frames_tensor = torch.stack(frames).unsqueeze(0).to(device)
+
+    # Step 3: Run Inference
+    model.eval()
+    with torch.no_grad():
+        outputs = model(frames_tensor)
+        prob = torch.sigmoid(outputs).item()
+
+    prediction = "FAKE" if prob >= 0.5 else "REAL"
+
+    # Step 4: Clean up
+    shutil.rmtree(frame_output_dir)
+
+    return prob, prediction
+
+video_path = "sample_vid.mp4"  # Replace with uploaded video path
+
+prob, prediction = predict_deepfake(video_path, model, transform, device)
+
+print(f"\nDeepfake Probability: {prob:.4f}")
+print(f"Prediction: {prediction}")
